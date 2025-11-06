@@ -1,0 +1,418 @@
+%% ========================================================================
+%% NAD+ Biosynthesis Model - CONSTANT TRP and NA, Simple Salvage pathway
+%% ========================================================================
+
+clear; clc;close all;
+
+%% ========================================================================
+%% 1. CONSTANT CONCENTRATIONS (Parameters, not state variables)
+%% ========================================================================
+
+% Fixed substrate concentrations (μM)
+TRP_const = 0.061;   % Constant tryptophan (dietary supply)
+NA_const = 0.04;     % Constant nicotinic acid (dietary supply)
+
+%% ========================================================================
+%% 2. MODIFIED STOICHIOMETRIC MATRIX (9 metabolites x 11 reactions)
+%% ========================================================================
+
+% State variables (rows):
+% 01. N-FK
+% 02. KYN
+% 03. 3-HK
+% 04. 3-HAA
+% 05. ACMS
+% 06. QA
+% 07. NAMN
+% 08. NAAD
+% 09. NAD+
+
+% Reactions (columns):
+% v01:  TRP → N-FK (using TRP_const)
+% v02:  N-FK → KYN
+% v03:  KYN → 3-HK
+% v04:  3-HK → 3-HAA
+% v05:  3-HAA → ACMS
+% v06:  ACMS → QA (spontaneous)
+% v07:  QA → NAMN
+% v08:  NA → NAMN (using NA_const)
+% v09:  NAMN → NAAD
+% v10:  NAAD → NAD+
+% v11:  NAD+ → NAM
+
+%  v01 v02 v03 v04 v05 v06 v07 v08 v09 v10 v11
+S = [
+    1  -1   0   0   0   0   0   0   0   0   0;   % N-FK
+    0   1  -1   0   0   0   0   0   0   0   0;   % KYN
+    0   0   1  -1   0   0   0   0   0   0   0;   % 3-HK
+    0   0   0   1  -1   0   0   0   0   0   0;   % 3-HAA
+    0   0   0   0   1  -1   0   0   0   0   0;   % ACMS
+    0   0   0   0   0   1  -1   0   0   0   0;   % QA
+    0   0   0   0   0   0   1   1  -1   0   0;   % NAMN (convergence!)
+    0   0   0   0   0   0   0   0   1  -1   0;   % NAAD
+    0   0   0   0   0   0   0   0   0   1  -1;   % NAD+
+];
+
+
+%% ========================================================================
+%% 3. ENZYME PARAMETERS
+%% ========================================================================
+
+% Michaelis-Menten constants (μM)
+params.Km = struct(...
+    'TDO2', 177, ...
+    'IDO1', 20, ...
+    'AFMID', 320, ...
+    'KMO', 24, ...
+    'KYNU', 23.8, ...
+    'HAAO', 6, ...
+    'QPRT', 21.6, ...
+    'NAPRT', 72.3, ...
+    'NMNAT1', 67.7, ...
+    'NADSYN1', 260, ...
+    'CD38', 200);
+
+% Catalytic rate constants (s⁻¹)
+params.kcat = struct(...
+    'TDO2', 2.61, ...
+    'IDO1', 1.4, ...
+    'AFMID', 26.4, ...
+    'KMO', 1.2, ...
+    'KYNU', 2.5, ...
+    'HAAO', 1.5, ...
+    'QPRT', 3.5, ...
+    'NAPRT', 0.25, ...
+    'NMNAT1', 42.9, ...
+    'NADSYN1', 3.2, ...
+    'CD38', 50);
+
+% Maximum enzymatic rate (μM)
+params.V_max = struct(...
+    'KMO', 8.5, ...
+    'QPRT', 1.2);
+
+% Enzyme concentrations (μM)
+params.E_young = struct(...
+    'TDO2', 18.92, ...
+    'IDO1', 20.88, ...
+    'AFMID', 201.6, ...
+    'KYNU', 436, ...
+    'HAAO', 3284, ...
+    'NAPRT', 1492, ...
+    'NMNAT1', 35.76, ...
+    'NADSYN1', 66.8, ...
+    'CD38', 12.72);
+
+% Enzyme concentrations (μM)
+params.E_aged = struct(...
+    'TDO2', 18.92, ...      % 2x increase!
+    'IDO1', 20.88*2, ...
+    'AFMID', 201.6, ...
+    'KYNU', 436, ...
+    'HAAO', 3284, ...
+    'NAPRT', 1492, ...
+    'NMNAT1', 35.76*.5, ...      % 50% decrease
+    'NADSYN1', 66.8, ...
+    'CD38', 12.72*2);      % 2x increase!
+
+% Spontaneous reaction rate constant
+params.k_spontaneous = 1;  % h⁻¹
+
+% Store constant concentrations in params
+params.TRP_const = TRP_const;
+params.NA_const = NA_const;
+
+%% ========================================================================
+%% 4. INITIAL CONDITIONS (9 metabolites only)
+%% ========================================================================
+
+% Initial concentrations (μM)
+% [N-FK, KYN, 3-HK, 3-HAA, ACMS, QA, NAMN, NAAD, NAD+]
+c0 = [
+    0;      % N-FK
+    0;      % KYN
+    0;      % 3-HK
+    0;      % 3-HAA
+    0;      % ACMS
+    0;      % QA
+    0;      % NAMN
+    0;      % NAAD
+    0;      % NAD+ (baseline)
+];
+
+%% ========================================================================
+%% 5. RATE FUNCTIONS
+%% ========================================================================
+
+% Michaelis-Menten kinetics
+MM = @(Vmax, c, Km) (Vmax * c) / (Km + c);
+
+% Rate vector function - YOUNG
+v_rates_young = @(c, p) [
+    % v1: TRP → N-FK (uses CONSTANT TRP)
+    MM(p.kcat.TDO2*p.E_young.TDO2, p.TRP_const, p.Km.TDO2) + ...
+    MM(p.kcat.IDO1*p.E_young.IDO1, p.TRP_const, p.Km.IDO1);
+    
+    % v2: N-FK → KYN
+    MM(p.kcat.AFMID*p.E_young.AFMID, c(1), p.Km.AFMID);
+    
+    % v3: KYN → 3-HK
+    MM(p.V_max.KMO, c(2), p.Km.KMO);
+    
+    % v4: 3-HK → 3-HAA
+    MM(p.kcat.KYNU*p.E_young.KYNU, c(3), p.Km.KYNU);
+    
+    % v5: 3-HAA → ACMS
+    MM(p.kcat.HAAO*p.E_young.HAAO, c(4), p.Km.HAAO);
+    
+    % v6: ACMS → QA (spontaneous)
+    p.k_spontaneous * c(5);
+    
+    % v7: QA → NAMN
+    MM(p.V_max.QPRT, c(6), p.Km.QPRT);
+    
+    % v8: NA → NAMN (uses CONSTANT NA)
+    MM(p.kcat.NAPRT*p.E_young.NAPRT, p.NA_const, p.Km.NAPRT);
+    
+    % v9: NAMN → NAAD (all isoforms)
+    MM(p.kcat.NMNAT1*p.E_young.NMNAT1, c(7), p.Km.NMNAT1/p.Km.NMNAT1);
+    
+    % v10: NAAD → NAD+
+    MM(p.kcat.NADSYN1*p.E_young.NADSYN1, c(8), p.Km.NADSYN1);
+    
+    % v11: NAD+ consumption
+    MM(p.kcat.CD38*p.E_young.CD38, c(9), p.Km.CD38);
+];
+
+% Rate vector function - AGED
+v_rates_aged = @(c, p) [
+    % v1: TRP → N-FK (uses CONSTANT TRP, increased IDO1)
+    MM(p.kcat.TDO2*p.E_aged.TDO2, p.TRP_const, p.Km.TDO2) + ...
+    MM(p.kcat.IDO1*p.E_aged.IDO1, p.TRP_const, p.Km.IDO1);
+    
+    % v2: N-FK → KYN
+    MM(p.kcat.AFMID*p.E_aged.AFMID, c(1), p.Km.AFMID);
+    
+    % v3: KYN → 3-HK
+    MM(p.V_max.KMO, c(2), p.Km.KMO);
+    
+    % v4: 3-HK → 3-HAA
+    MM(p.kcat.KYNU*p.E_aged.KYNU, c(3), p.Km.KYNU);
+    
+    % v5: 3-HAA → ACMS
+    MM(p.kcat.HAAO*p.E_aged.HAAO, c(4), p.Km.HAAO);
+    
+    % v6: ACMS → QA (spontaneous)
+    p.k_spontaneous * c(5);
+    
+    % v7: QA → NAMN
+    MM(p.V_max.QPRT, c(6), p.Km.QPRT);
+    
+    % v8: NA → NAMN (uses CONSTANT NA, decreased NAPRT)
+    MM(p.kcat.NAPRT*p.E_aged.NAPRT, p.NA_const, p.Km.NAPRT);
+    
+    % v9: NAMN → NAAD (decreased NMNAT2)
+    MM(p.kcat.NMNAT1*p.E_aged.NMNAT1, c(7), p.Km.NMNAT1/p.Km.NMNAT1);
+
+    % v10: NAAD → NAD+
+    MM(p.kcat.NADSYN1*p.E_aged.NADSYN1, c(8), p.Km.NADSYN1);
+    
+    % v11: NAD+ → NAM (INCREASED CD38!)
+    MM(p.kcat.CD38*p.E_aged.CD38, c(9), p.Km.CD38);
+];
+
+%% ========================================================================
+%% 6. ODE SYSTEM
+%% ========================================================================
+
+% ODE function - YOUNG
+dcdt_young = @(t, c) S * v_rates_young(c, params);
+
+% ODE function - AGED
+dcdt_aged = @(t, c) S * v_rates_aged(c, params);
+
+%% ========================================================================
+%% 7. SIMULATION
+%% ========================================================================
+
+% Time span (hours)
+tspan = [0 50];
+
+% Solve ODEs
+[t_young, c_young] = ode15s(dcdt_young, tspan, c0);
+[t_aged, c_aged] = ode15s(dcdt_aged, tspan, c0);
+
+% Calculate fluxes for analysis
+v_young_final = v_rates_young(c_young(end,:)', params);
+v_aged_final = v_rates_aged(c_aged(end,:)', params);
+
+%% ========================================================================
+%% 8. VISUALIZATION
+%% ========================================================================
+
+% Metabolite names
+metab_names = {'N-FK', 'KYN', '3-HK', '3-HAA', 'ACMS', 'QA', 'NAMN', 'NAAD', 'NAD+'};
+
+% Figure 1: Compare Young vs Aged - Key Metabolites
+figure();
+
+% N-FK
+subplot(3,3,1);
+plot(t_young, c_young(:,1), 'b-', 'LineWidth', 2); hold on;
+plot(t_aged, c_aged(:,1), 'r--', 'LineWidth', 2);
+xlabel('Time (hours)'); ylabel('Concentration (μM)');
+title('N-FK');
+legend('Young', 'Aged', 'Location', 'best');
+grid on;
+
+% KYN
+subplot(3,3,2);
+plot(t_young, c_young(:,2), 'b-', 'LineWidth', 2); hold on;
+plot(t_aged, c_aged(:,2), 'r--', 'LineWidth', 2);
+xlabel('Time (hours)'); ylabel('Concentration (μM)');
+title('KYN');
+legend('Young', 'Aged', 'Location', 'best');
+grid on;
+
+% 3-HK
+subplot(3,3,3);
+plot(t_young, c_young(:,3), 'b-', 'LineWidth', 2); hold on;
+plot(t_aged, c_aged(:,3), 'r--', 'LineWidth', 2);
+xlabel('Time (hours)'); ylabel('Concentration (μM)');
+title('3-HK');
+legend('Young', 'Aged', 'Location', 'best');
+grid on;
+
+% 3-HAA
+subplot(3,3,4);
+plot(t_young, c_young(:,4), 'b-', 'LineWidth', 2); hold on;
+plot(t_aged, c_aged(:,4), 'r--', 'LineWidth', 2);
+xlabel('Time (hours)'); ylabel('Concentration (μM)');
+title('3-HAA');
+legend('Young', 'Aged', 'Location', 'best');
+grid on;
+
+% ACMS
+subplot(3,3,5);
+plot(t_young, c_young(:,5), 'b-', 'LineWidth', 2); hold on;
+plot(t_aged, c_aged(:,5), 'r--', 'LineWidth', 2);
+xlabel('Time (hours)'); ylabel('Concentration (μM)');
+title('ACMS');
+legend('Young', 'Aged', 'Location', 'best');
+grid on;
+
+% QA
+subplot(3,3,6);
+plot(t_young, c_young(:,6), 'b-', 'LineWidth', 2); hold on;
+plot(t_aged, c_aged(:,6), 'r--', 'LineWidth', 2);
+xlabel('Time (hours)'); ylabel('Concentration (μM)');
+title('QA');
+legend('Young', 'Aged', 'Location', 'best');
+grid on;
+
+% NAMN
+subplot(3,3,7);
+plot(t_young, c_young(:,7), 'b-', 'LineWidth', 2); hold on;
+plot(t_aged, c_aged(:,7), 'r--', 'LineWidth', 2);
+xlabel('Time (hours)'); ylabel('Concentration (μM)');
+title('NAMN');
+legend('Young', 'Aged', 'Location', 'best');
+grid on;
+
+% NAAD
+subplot(3,3,8);
+plot(t_young, c_young(:,8), 'b-', 'LineWidth', 2); hold on;
+plot(t_aged, c_aged(:,8), 'r--', 'LineWidth', 2);
+xlabel('Time (hours)'); ylabel('Concentration (μM)');
+title('NAAD');
+legend('Young', 'Aged', 'Location', 'best');
+grid on;
+
+% NAD+
+subplot(3,3,9);
+plot(t_young, c_young(:,9), 'b-', 'LineWidth', 2); hold on;
+plot(t_aged, c_aged(:,9), 'r--', 'LineWidth', 2);
+xlabel('Time (hours)'); ylabel('Concentration (μM)');
+title('NAD+');
+legend('Young', 'Aged', 'Location', 'best');
+grid on;
+
+% Figure 2: All metabolites - Young
+figure();
+subplot(1,2,1);
+plot(t_young, c_young, 'LineWidth', 1.5);
+xlabel('Time (hours)'); ylabel('Concentration (μM)');
+title('Young - All Metabolites');
+legend(metab_names, 'Location', 'eastoutside');
+grid on;
+
+% All metabolites - Aged
+subplot(1,2,2);
+plot(t_aged, c_aged, 'LineWidth', 1.5);
+xlabel('Time (hours)'); ylabel('Concentration (μM)');
+title('Aged - All Metabolites');
+legend(metab_names, 'Location', 'eastoutside');
+grid on;
+
+sgtitle('Complete Time Course (Constant TRP & NA)', 'FontSize', 14, 'FontWeight', 'bold');
+
+% Figure 3: Flux analysis
+figure();
+flux_names = {'v1:TRP→N-FK', 'v2:N-FK→KYN', 'v3:KYN→3-HK', 'v4:3-HK→3-HAA', ...
+              'v5:3-HAA→ACMS', 'v6:ACMS→QA', 'v7:QA→NAMN', 'v8:NA→NAMN', ...
+              'v9:NAMN→NAAD', 'v10:NAAD→NAD+', 'v11:NAD+→NAM', 'v12:NAM→NMN', 'v13:NMN→NAD+'};
+
+x = 1:11;
+bar(x, [v_young_final, v_aged_final]);
+set(gca, 'XTick', x, 'XTickLabel', flux_names, 'XTickLabelRotation', 45);
+ylabel('Flux (μM/s)');
+title('Steady-State Fluxes: Young vs Aged');
+legend('Young', 'Aged', 'Location', 'best');
+grid on;
+
+%% ========================================================================
+%% 9. QUANTITATIVE ANALYSIS
+%% ========================================================================
+
+fprintf('\n======================================================\n');
+fprintf('NAD+ BIOSYNTHESIS MODEL - CONSTANT TRP & NA\n');
+fprintf('======================================================\n\n');
+
+fprintf('CONSTANT CONCENTRATIONS:\n');
+fprintf('  Tryptophan (TRP):     %.1f μM\n', TRP_const);
+fprintf('  Nicotinic Acid (NA):  %.1f μM\n\n', NA_const);
+
+fprintf('STEADY-STATE METABOLITE CONCENTRATIONS:\n');
+fprintf('                           Young        Aged      Change\n');
+fprintf('--------------------------------------------------------\n');
+for i = 1:length(metab_names)
+    change_pct = ((c_aged(end,i) - c_young(end,i)) / c_young(end,i)) * 100;
+    fprintf('  %-8s    %10.2f   %10.2f   %+7.1f%%\n', ...
+        metab_names{i}, c_young(end,i), c_aged(end,i), change_pct);
+end
+
+fprintf('\n');
+fprintf('PATHWAY FLUX CONTRIBUTIONS AT STEADY STATE:\n');
+fprintf('--------------------------------------------------------\n');
+fprintf('De novo flux (v7: QA→NAMN):     %.3f μM/s (Young)  %.3f μM/s (Aged)\n', ...
+    v_young_final(7), v_aged_final(7));
+fprintf('Preiss-Handler flux (v8: NA→NAMN): %.3f μM/s (Young)  %.3f μM/s (Aged)\n', ...
+    v_young_final(8), v_aged_final(8));
+fprintf('Total NAMN synthesis:           %.3f μM/s (Young)  %.3f μM/s (Aged)\n', ...
+    v_young_final(7)+v_young_final(8), v_aged_final(7)+v_aged_final(8));
+fprintf('NAD+ consumption (v11):         %.3f μM/s (Young)  %.3f μM/s (Aged)\n', ...
+    v_young_final(11), v_aged_final(11));
+
+fprintf('\n');
+fprintf('KEY OBSERVATIONS:\n');
+fprintf('--------------------------------------------------------\n');
+fprintf('1. NAD+ decline with aging: %.1f%%\n', ...
+    ((c_aged(end,9) - c_young(end,9)) / c_young(end,9)) * 100);
+fprintf('2. CD38 activity increase: %.1fx\n', ...
+    params.E_aged.CD38 / params.E_young.CD38);
+fprintf('3. Preiss-Handler contribution (Young): %.1f%%\n', ...
+    (v_young_final(8) / (v_young_final(7)+v_young_final(8))) * 100);
+fprintf('4. Preiss-Handler contribution (Aged): %.1f%%\n', ...
+    (v_aged_final(8) / (v_aged_final(7)+v_aged_final(8))) * 100);
+
+fprintf('\n======================================================\n\n');
