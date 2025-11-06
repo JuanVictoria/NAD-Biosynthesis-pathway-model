@@ -39,18 +39,22 @@ NA_const = 0.04;     % Constant nicotinic acid (dietary supply)
 % v09:  NAMN → NAAD
 % v10:  NAAD → NAD+
 % v11:  NAD+ → NAM
+% v12:  NAD+ → NADH
+% v13:  NADH → NAD+
+
 
 %  v01 v02 v03 v04 v05 v06 v07 v08 v09 v10 v11
 S = [
-    1  -1   0   0   0   0   0   0   0   0   0;   % N-FK
-    0   1  -1   0   0   0   0   0   0   0   0;   % KYN
-    0   0   1  -1   0   0   0   0   0   0   0;   % 3-HK
-    0   0   0   1  -1   0   0   0   0   0   0;   % 3-HAA
-    0   0   0   0   1  -1   0   0   0   0   0;   % ACMS
-    0   0   0   0   0   1  -1   0   0   0   0;   % QA
-    0   0   0   0   0   0   1   1  -1   0   0;   % NAMN (convergence!)
-    0   0   0   0   0   0   0   0   1  -1   0;   % NAAD
-    0   0   0   0   0   0   0   0   0   1  -1;   % NAD+
+    1  -1   0   0   0   0   0   0   0   0   0   0   0;   % N-FK
+    0   1  -1   0   0   0   0   0   0   0   0   0   0;   % KYN
+    0   0   1  -1   0   0   0   0   0   0   0   0   0;   % 3-HK
+    0   0   0   1  -1   0   0   0   0   0   0   0   0;   % 3-HAA
+    0   0   0   0   1  -1   0   0   0   0   0   0   0;   % ACMS
+    0   0   0   0   0   1  -1   0   0   0   0   0   0;   % QA
+    0   0   0   0   0   0   1   1  -1   0   0   0   0;   % NAMN (convergence!)
+    0   0   0   0   0   0   0   0   1  -1   0   0   0;   % NAAD
+    0   0   0   0   0   0   0   0   0   1  -1  -1   1;   % NAD+
+    0   0   0   0   0   0   0   0   0   0   0   1  -1;   % NADH
 ];
 
 
@@ -111,12 +115,17 @@ params.E_aged = struct(...
     'KYNU', 436, ...
     'HAAO', 3284, ...
     'NAPRT', 1492, ...
-    'NMNAT1', 35.76*.5, ...      % 50% decrease
+    'NMNAT1', 35.76*0.5, ...      % 50% decrease
     'NADSYN1', 66.8, ...
     'CD38', 12.72*2);      % 2x increase!
 
 % Spontaneous reaction rate constant
 params.k_spontaneous = 1;  % h⁻¹
+
+% Reaction rate of NAD+ → NADH
+params.k_f = 0.08;
+%r Reaction rate of NADH → NAD+
+params.k_b = 0.04;
 
 % Store constant concentrations in params
 params.TRP_const = TRP_const;
@@ -137,7 +146,8 @@ c0 = [
     0;      % QA
     0;      % NAMN
     0;      % NAAD
-    0;      % NAD+ (baseline)
+    0;      % NAD+
+    0;      % NADH
 ];
 
 %% ========================================================================
@@ -174,19 +184,25 @@ v_rates_young = @(c, p) [
     % v8: NA → NAMN (uses CONSTANT NA)
     MM(p.kcat.NAPRT*p.E_young.NAPRT, p.NA_const, p.Km.NAPRT);
     
-    % v9: NAMN → NAAD (all isoforms)
+    % v9: NAMN → NAAD
     MM(p.kcat.NMNAT1*p.E_young.NMNAT1, c(7), p.Km.NMNAT1/p.Km.NMNAT1);
     
     % v10: NAAD → NAD+
     MM(p.kcat.NADSYN1*p.E_young.NADSYN1, c(8), p.Km.NADSYN1);
     
-    % v11: NAD+ consumption
+    % v11: NAD+ → NAM
     MM(p.kcat.CD38*p.E_young.CD38, c(9), p.Km.CD38);
+
+    % v12: NAD+ → NADH
+    p.k_f * c(9);
+
+    % v13: NADH → NAD+
+    p.k_b * c(10);
 ];
 
 % Rate vector function - AGED
 v_rates_aged = @(c, p) [
-    % v1: TRP → N-FK (uses CONSTANT TRP, increased IDO1)
+    % v1: TRP → N-FK (uses CONSTANT TRP)
     MM(p.kcat.TDO2*p.E_aged.TDO2, p.TRP_const, p.Km.TDO2) + ...
     MM(p.kcat.IDO1*p.E_aged.IDO1, p.TRP_const, p.Km.IDO1);
     
@@ -208,17 +224,23 @@ v_rates_aged = @(c, p) [
     % v7: QA → NAMN
     MM(p.V_max.QPRT, c(6), p.Km.QPRT);
     
-    % v8: NA → NAMN (uses CONSTANT NA, decreased NAPRT)
+    % v8: NA → NAMN (uses CONSTANT NA)
     MM(p.kcat.NAPRT*p.E_aged.NAPRT, p.NA_const, p.Km.NAPRT);
     
-    % v9: NAMN → NAAD (decreased NMNAT2)
+    % v9: NAMN → NAAD
     MM(p.kcat.NMNAT1*p.E_aged.NMNAT1, c(7), p.Km.NMNAT1/p.Km.NMNAT1);
 
     % v10: NAAD → NAD+
     MM(p.kcat.NADSYN1*p.E_aged.NADSYN1, c(8), p.Km.NADSYN1);
     
-    % v11: NAD+ → NAM (INCREASED CD38!)
+    % v11: NAD+ → NAM
     MM(p.kcat.CD38*p.E_aged.CD38, c(9), p.Km.CD38);
+
+    % v12: NAD+ → NADH
+    p.k_f * c(9);
+
+    % v13: NADH → NAD+
+    p.k_b * c(10);
 ];
 
 %% ========================================================================
@@ -236,7 +258,7 @@ dcdt_aged = @(t, c) S * v_rates_aged(c, params);
 %% ========================================================================
 
 % Time span (hours)
-tspan = [0 50];
+tspan = [0 100];
 
 % Solve ODEs
 [t_young, c_young] = ode15s(dcdt_young, tspan, c0);
@@ -251,13 +273,13 @@ v_aged_final = v_rates_aged(c_aged(end,:)', params);
 %% ========================================================================
 
 % Metabolite names
-metab_names = {'N-FK', 'KYN', '3-HK', '3-HAA', 'ACMS', 'QA', 'NAMN', 'NAAD', 'NAD+'};
+metab_names = {'N-FK', 'KYN', '3-HK', '3-HAA', 'ACMS', 'QA', 'NAMN', 'NAAD', 'NAD+', 'NADH'};
 
-% Figure 1: Compare Young vs Aged - Key Metabolites
+% Figure 1: Compare Young vs Aged - Before convergence
 figure();
 
 % N-FK
-subplot(3,3,1);
+subplot(2,3,1);
 plot(t_young, c_young(:,1), 'b-', 'LineWidth', 2); hold on;
 plot(t_aged, c_aged(:,1), 'r--', 'LineWidth', 2);
 xlabel('Time (hours)'); ylabel('Concentration (μM)');
@@ -266,7 +288,7 @@ legend('Young', 'Aged', 'Location', 'best');
 grid on;
 
 % KYN
-subplot(3,3,2);
+subplot(2,3,2);
 plot(t_young, c_young(:,2), 'b-', 'LineWidth', 2); hold on;
 plot(t_aged, c_aged(:,2), 'r--', 'LineWidth', 2);
 xlabel('Time (hours)'); ylabel('Concentration (μM)');
@@ -275,7 +297,7 @@ legend('Young', 'Aged', 'Location', 'best');
 grid on;
 
 % 3-HK
-subplot(3,3,3);
+subplot(2,3,3);
 plot(t_young, c_young(:,3), 'b-', 'LineWidth', 2); hold on;
 plot(t_aged, c_aged(:,3), 'r--', 'LineWidth', 2);
 xlabel('Time (hours)'); ylabel('Concentration (μM)');
@@ -284,7 +306,7 @@ legend('Young', 'Aged', 'Location', 'best');
 grid on;
 
 % 3-HAA
-subplot(3,3,4);
+subplot(2,3,4);
 plot(t_young, c_young(:,4), 'b-', 'LineWidth', 2); hold on;
 plot(t_aged, c_aged(:,4), 'r--', 'LineWidth', 2);
 xlabel('Time (hours)'); ylabel('Concentration (μM)');
@@ -293,7 +315,7 @@ legend('Young', 'Aged', 'Location', 'best');
 grid on;
 
 % ACMS
-subplot(3,3,5);
+subplot(2,3,5);
 plot(t_young, c_young(:,5), 'b-', 'LineWidth', 2); hold on;
 plot(t_aged, c_aged(:,5), 'r--', 'LineWidth', 2);
 xlabel('Time (hours)'); ylabel('Concentration (μM)');
@@ -302,7 +324,7 @@ legend('Young', 'Aged', 'Location', 'best');
 grid on;
 
 % QA
-subplot(3,3,6);
+subplot(2,3,6);
 plot(t_young, c_young(:,6), 'b-', 'LineWidth', 2); hold on;
 plot(t_aged, c_aged(:,6), 'r--', 'LineWidth', 2);
 xlabel('Time (hours)'); ylabel('Concentration (μM)');
@@ -310,8 +332,13 @@ title('QA');
 legend('Young', 'Aged', 'Location', 'best');
 grid on;
 
+sgtitle('Before Convergence (Constant TRP & NA)', 'FontSize', 14, 'FontWeight', 'bold');
+
+%% Figure 2: Compare Young vs Aged - After convergence
+figure();
+
 % NAMN
-subplot(3,3,7);
+subplot(2,2,1);
 plot(t_young, c_young(:,7), 'b-', 'LineWidth', 2); hold on;
 plot(t_aged, c_aged(:,7), 'r--', 'LineWidth', 2);
 xlabel('Time (hours)'); ylabel('Concentration (μM)');
@@ -320,7 +347,7 @@ legend('Young', 'Aged', 'Location', 'best');
 grid on;
 
 % NAAD
-subplot(3,3,8);
+subplot(2,2,2);
 plot(t_young, c_young(:,8), 'b-', 'LineWidth', 2); hold on;
 plot(t_aged, c_aged(:,8), 'r--', 'LineWidth', 2);
 xlabel('Time (hours)'); ylabel('Concentration (μM)');
@@ -329,7 +356,7 @@ legend('Young', 'Aged', 'Location', 'best');
 grid on;
 
 % NAD+
-subplot(3,3,9);
+subplot(2,2,3);
 plot(t_young, c_young(:,9), 'b-', 'LineWidth', 2); hold on;
 plot(t_aged, c_aged(:,9), 'r--', 'LineWidth', 2);
 xlabel('Time (hours)'); ylabel('Concentration (μM)');
@@ -337,6 +364,16 @@ title('NAD+');
 legend('Young', 'Aged', 'Location', 'best');
 grid on;
 
+% NADH
+subplot(2,2,4);
+plot(t_young, c_young(:,10), 'b-', 'LineWidth', 2); hold on;
+plot(t_aged, c_aged(:,10), 'r--', 'LineWidth', 2);
+xlabel('Time (hours)'); ylabel('Concentration (μM)');
+title('NADH');
+legend('Young', 'Aged', 'Location', 'best');
+grid on;
+
+sgtitle('After Convergence (Constant TRP & NA)', 'FontSize', 14, 'FontWeight', 'bold');
 % Figure 2: All metabolites - Young
 figure();
 subplot(1,2,1);
@@ -360,9 +397,9 @@ sgtitle('Complete Time Course (Constant TRP & NA)', 'FontSize', 14, 'FontWeight'
 figure();
 flux_names = {'v1:TRP→N-FK', 'v2:N-FK→KYN', 'v3:KYN→3-HK', 'v4:3-HK→3-HAA', ...
               'v5:3-HAA→ACMS', 'v6:ACMS→QA', 'v7:QA→NAMN', 'v8:NA→NAMN', ...
-              'v9:NAMN→NAAD', 'v10:NAAD→NAD+', 'v11:NAD+→NAM', 'v12:NAM→NMN', 'v13:NMN→NAD+'};
+              'v9:NAMN→NAAD', 'v10:NAAD→NAD+', 'v11:NAD+→NAM', 'v12:NAD+→NADH', 'v13:NADH→NAD+'};
 
-x = 1:11;
+x = 1:13;
 bar(x, [v_young_final, v_aged_final]);
 set(gca, 'XTick', x, 'XTickLabel', flux_names, 'XTickLabelRotation', 45);
 ylabel('Flux (μM/s)');
@@ -408,11 +445,9 @@ fprintf('KEY OBSERVATIONS:\n');
 fprintf('--------------------------------------------------------\n');
 fprintf('1. NAD+ decline with aging: %.1f%%\n', ...
     ((c_aged(end,9) - c_young(end,9)) / c_young(end,9)) * 100);
-fprintf('2. CD38 activity increase: %.1fx\n', ...
-    params.E_aged.CD38 / params.E_young.CD38);
-fprintf('3. Preiss-Handler contribution (Young): %.1f%%\n', ...
+fprintf('2. Preiss-Handler contribution (Young): %.1f%%\n', ...
     (v_young_final(8) / (v_young_final(7)+v_young_final(8))) * 100);
-fprintf('4. Preiss-Handler contribution (Aged): %.1f%%\n', ...
+fprintf('3. Preiss-Handler contribution (Aged): %.1f%%\n', ...
     (v_aged_final(8) / (v_aged_final(7)+v_aged_final(8))) * 100);
 
 fprintf('\n======================================================\n\n');
