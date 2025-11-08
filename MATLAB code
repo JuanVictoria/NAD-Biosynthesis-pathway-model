@@ -43,7 +43,7 @@ NA_const = 0.04;     % Constant nicotinic acid (dietary supply)
 % v13:  NADH → NAD+
 
 
-%  v01 v02 v03 v04 v05 v06 v07 v08 v09 v10 v11
+%  v01 v02 v03 v04 v05 v06 v07 v08 v09 v10 v11 v12 v13
 S = [
     1  -1   0   0   0   0   0   0   0   0   0   0   0;   % N-FK
     0   1  -1   0   0   0   0   0   0   0   0   0   0;   % KYN
@@ -185,7 +185,7 @@ v_rates_young = @(c, p) [
     MM(p.kcat.NAPRT*p.E_young.NAPRT, p.NA_const, p.Km.NAPRT);
     
     % v9: NAMN → NAAD
-    MM(p.kcat.NMNAT1*p.E_young.NMNAT1, c(7), p.Km.NMNAT1/p.Km.NMNAT1);
+    MM(p.kcat.NMNAT1*p.E_young.NMNAT1, c(7), p.Km.NMNAT1);
     
     % v10: NAAD → NAD+
     MM(p.kcat.NADSYN1*p.E_young.NADSYN1, c(8), p.Km.NADSYN1);
@@ -228,7 +228,7 @@ v_rates_aged = @(c, p) [
     MM(p.kcat.NAPRT*p.E_aged.NAPRT, p.NA_const, p.Km.NAPRT);
     
     % v9: NAMN → NAAD
-    MM(p.kcat.NMNAT1*p.E_aged.NMNAT1, c(7), p.Km.NMNAT1/p.Km.NMNAT1);
+    MM(p.kcat.NMNAT1*p.E_aged.NMNAT1, c(7), p.Km.NMNAT1);
 
     % v10: NAAD → NAD+
     MM(p.kcat.NADSYN1*p.E_aged.NADSYN1, c(8), p.Km.NADSYN1);
@@ -449,5 +449,4 @@ fprintf('2. Preiss-Handler contribution (Young): %.1f%%\n', ...
     (v_young_final(8) / (v_young_final(7)+v_young_final(8))) * 100);
 fprintf('3. Preiss-Handler contribution (Aged): %.1f%%\n', ...
     (v_aged_final(8) / (v_aged_final(7)+v_aged_final(8))) * 100);
-
 fprintf('\n======================================================\n\n');
